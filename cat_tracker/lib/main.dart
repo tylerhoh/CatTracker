@@ -49,7 +49,7 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> {
   final flutterReactiveBle = FlutterReactiveBle();
-  final Uuid serviceId = Uuid.parse("replace me");
+  final Uuid serviceId = Uuid.parse("aa55bb44cc33dd22ee11d770a67c7797");
   String _deviceName="disconnected";
 
   void _scanDevices() {
