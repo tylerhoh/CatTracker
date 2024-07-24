@@ -1,5 +1,95 @@
+// import 'package:flutter/material.dart';
+// import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
+// import 'package:provider/provider.dart';
+// import 'src/ble/ble_logger.dart';
+// import 'src/ble/ble_scanner.dart';
+// import 'src/ble/ble_device_connector.dart';
+// import 'src/ble/ble_device_interactor.dart';
+// import 'src/ble/ble_status_monitor.dart';
+// import 'src/ui/ble_status_screen.dart';
+// import 'src/ui/device_list.dart';
+
+// const _themeColor = Colors.lightGreen;
+
+// void main() {
+//   WidgetsFlutterBinding.ensureInitialized();
+  
+  
+//   final ble = FlutterReactiveBle();
+//   final bleLogger = BleLogger(ble: ble);
+//   final scanner = BleScanner(ble: ble, logMessage: bleLogger.addToLog);
+//   final monitor = BleStatusMonitor(ble);
+//   final connector = BleDeviceConnector(
+//     ble: ble,
+//     logMessage: bleLogger.addToLog,
+//   );
+//   final serviceDiscoverer = BleDeviceInteractor(
+//     bleDiscoverServices: ble.discoverAllServices,
+//     readCharacteristic: ble.readCharacteristic,
+//     writeWithResponse: ble.writeCharacteristicWithResponse,
+//     writeWithOutResponse: ble.writeCharacteristicWithoutResponse,
+//     subscribeToCharacteristic: ble.subscribeToCharacteristic,
+//     logMessage: bleLogger.addToLog,
+//   );
+//   runApp(
+//     MultiProvider(
+//       providers: [
+//         Provider.value(value: scanner),
+//         Provider.value(value: monitor),
+//         Provider.value(value: connector),
+//         Provider.value(value: serviceDiscoverer),
+//         Provider.value(value: bleLogger),
+//         StreamProvider<BleScannerState?>(
+//           create: (_) => scanner.state,
+//           initialData: const BleScannerState(
+//             discoveredDevices: [],
+//             scanIsInProgress: false,
+//           ),
+//         ),
+//         StreamProvider<BleStatus?>(
+//           create: (_) => monitor.state,
+//           initialData: BleStatus.unknown,
+//         ),
+//         StreamProvider<ConnectionStateUpdate>(
+//           create: (_) => connector.state,
+//           initialData: const ConnectionStateUpdate(
+//             deviceId: 'Unknown device',
+//             connectionState: DeviceConnectionState.disconnected,
+//             failure: null,
+//           ),
+//         ),
+//       ],
+//       child: MaterialApp(
+//         title: 'Flutter Reactive BLE example',
+//         color: _themeColor,
+//         theme: ThemeData(primarySwatch: _themeColor),
+//         home: const HomeScreen(),
+//       ),
+//     ),
+//   );
+// }
+
+// class HomeScreen extends StatelessWidget {
+//   const HomeScreen({
+//     super.key,
+//   });
+
+//   @override
+//   Widget build(BuildContext context) => Consumer<BleStatus?>(
+//         builder: (_, status, __) {
+//           if (status == BleStatus.ready) {
+            
+//             return const DeviceListScreen();
+//           } else {
+//             return BleStatusScreen(status: status ?? BleStatus.unknown);
+//           }
+//         },
+//       );
+// }
 import 'package:flutter/material.dart';
 import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'dart:math';
 
 void main() {
   runApp(const MyApp());
@@ -8,132 +98,131 @@ void main() {
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        // invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.green),
-        useMaterial3: true,
-      ),
-      home: const MyHomePage(title: 'Find My Cat'),
-
+    return const MaterialApp(
+      home: BleScanner(),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-
-  // This class is the configuration for the state. 
-  // It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. 
-  // Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
+class BleScanner extends StatefulWidget {
+  const BleScanner({super.key});
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  _BleScannerState createState() => _BleScannerState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
+class _BleScannerState extends State<BleScanner> {
   final flutterReactiveBle = FlutterReactiveBle();
-  final Uuid serviceId = Uuid.parse("aa55bb44cc33dd22ee11d770a67c7797");
-  String _deviceName="disconnected";
+  late Stream<DiscoveredDevice> scanStream;
+  final List<double> distanceBuffer = [-1, -1, -1];
+  int numOfSamples = 0;
+  double distance = -1;
 
-  void _scanDevices() {
-    _deviceName = "aroco";
-    flutterReactiveBle
-      .scanForDevices(
-       withServices: [serviceId],
-       scanMode: ScanMode.lowLatency
-      )
-      .listen(
-        (device) {
-         handleDevice(device);
-        }, 
-    onError: (error) {
-         handleError(error);
-      //code for handling error
+  @override
+  void initState() {
+    super.initState();
+    requestPermissions();
+  }
+
+  Future<void> requestPermissions() async {
+    Map<Permission, PermissionStatus> statuses = await [
+      Permission.bluetooth,
+      Permission.bluetoothScan,
+      Permission.bluetoothConnect,
+      Permission.location,
+    ].request();
+
+    if (statuses.values.every((status) => status.isGranted)) {
+      startScan();
+    } else {
+      // Handle permissions not granted
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Permissions not granted')),
+      );
+    }
+  }
+
+  void startScan() {
+    scanStream = flutterReactiveBle.scanForDevices(
+      withServices: [],
+      scanMode: ScanMode.lowLatency,
+    );
+
+    scanStream.listen((device) {
+      if (device.name.contains('ARO')) {
+        final currentDistance = calculateDistance(device.rssi);
+        setState(() {
+          distanceBuffer[numOfSamples % 3] = currentDistance;
+          numOfSamples++;
+          if (!distanceBuffer.contains(-1)) {
+            distance = distanceBuffer.reduce((a, b) => a + b) /
+                distanceBuffer.length;
+          } else {
+            distance = -1;
+          }
+        });
+      }
+    }, onError: (error) {
+      // Handle scan error
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Scan error: $error')),
+      );
     });
   }
-  void handleDevice(DiscoveredDevice device) {
-  // print("Discovered device:");
-  // print("ID: ${device.id}");
-  setState(() {
-     _deviceName = device.name;
-  }); 
-  // print("RSSI: ${device.rssi}");
-  // You can add the device to a list, update UI, etc.
-}
-void handleError(Object error) {
-  print("An error occurred while scanning for devices: $error");
-  // You can show an error message to the user, log the error, etc.
-}
+
+  double calculateDistance(int rssi) {
+    return rssi == 0 ? -1 : pow(10, (-75 - rssi) / (10 * 3)).toDouble();
+  }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
     return Scaffold(
       appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
+        title: const Text('Find My Cat'),
       ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
+      body: SafeArea(
         child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS:~ Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
           mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            const Text(
-              'You are now connected to:',
+          children: [
+            Expanded(
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Text(
+                      'Meters',
+                      style: TextStyle(fontSize: 50, color: Colors.black),
+                    ),
+                    Text(
+                      distance.toStringAsFixed(2),
+                      style: const TextStyle(fontSize: 100, color: Colors.black),
+                    ),
+                  ],
+                ),
+              ),
             ),
-            Text(
-              _deviceName,
-              style: Theme.of(context).textTheme.headlineMedium,
+            Padding(
+              padding: const EdgeInsets.all(20.0),
+              child: ElevatedButton(
+                onPressed: startScan,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.purple,
+                  padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 30),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: const Text(
+                  'FIND THE DISTANCE',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+                ),
+              ),
             ),
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _scanDevices,
-        tooltip: 'Scan for Devices',
-        child: const Icon(Icons.bluetooth),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
     );
   }
 }
