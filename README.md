@@ -1,7 +1,7 @@
 
-In the demo, I walked away from the bluetooth beacon while it was connected to my Iphone. 
+In the demo, I first clicked the button labeled "Find the Distance" which starts finding the RSSI signals after Bluetooth pairing is complete. 
 
-I changed the GATT profile from my app to handle long range mode. 
+Iphone in hand, I walked away from the bluetooth beacon. 
 
 https://github.com/user-attachments/assets/72a708d9-b94a-4b51-aa67-2c0705a92ded
 
